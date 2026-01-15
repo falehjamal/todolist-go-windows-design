@@ -2,17 +2,24 @@ package main
 
 import (
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+//go:embed index.html alpine.min.js
+var staticFiles embed.FS
 
 type Pelanggan struct {
 	ID     int    `json:"id"`
@@ -33,6 +40,20 @@ var (
 	mu sync.Mutex
 )
 
+// openBrowser opens the specified URL in the default browser
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default: // linux
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Start()
+}
+
 func main() {
 	var err error
 	db, err = sql.Open("sqlite", "./data.db")
@@ -42,12 +63,24 @@ func main() {
 
 	initDB()
 
-	// Static files
+	// Serve embedded static files
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "index.html")
+		content, err := staticFiles.ReadFile("index.html")
+		if err != nil {
+			http.Error(w, "File not found", 404)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(content)
 	})
 	http.HandleFunc("/alpine.min.js", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "alpine.min.js")
+		content, err := staticFiles.ReadFile("alpine.min.js")
+		if err != nil {
+			http.Error(w, "File not found", 404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Write(content)
 	})
 
 	// API endpoints
@@ -55,7 +88,19 @@ func main() {
 	http.HandleFunc("/api/add", addHandler)
 	http.HandleFunc("/api/delete", deleteHandler)
 
-	log.Println("Server jalan di :8080")
+	// Open browser after a short delay to ensure server is ready
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		log.Println("Membuka browser di http://localhost:8080")
+		openBrowser("http://localhost:8080")
+	}()
+
+	log.Println("===========================================")
+	log.Println("   CRUD Pelanggan - Server Berjalan")
+	log.Println("===========================================")
+	log.Println("Server jalan di http://localhost:8080")
+	log.Println("Tekan Ctrl+C untuk menghentikan server")
+	log.Println("===========================================")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
